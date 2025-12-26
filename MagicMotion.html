@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MagicMotion Web Control</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --primary: #1a73e8; --secondary: #5f6368; --error: #d93025;
+            --bg: #f8f9fa; --card: #ffffff; --accent: #e8f0fe;
+        }
+        body { font-family: 'Roboto', sans-serif; background: var(--bg); margin: 0; padding: 15px; display: flex; flex-direction: column; align-items: center; color: #202124; }
+        .container { max-width: 600px; width: 100%; display: flex; flex-direction: column; gap: 15px; }
+        .card { background: var(--card); border-radius: 12px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); position: relative; }
+        .header { display: flex; justify-content: space-between; align-items: center; }
+        .pressure-val { font-size: 48px; font-weight: bold; color: var(--primary); text-align: center; }
+        .btn { background: var(--primary); color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-weight: 500; width: 100%; transition: background 0.2s; }
+        .btn:active { opacity: 0.8; }
+        .btn-stop { background: var(--error); }
+        .btn-icon { background: none; border: none; cursor: pointer; color: var(--secondary); font-size: 24px; padding: 5px; display: flex; align-items: center; }
+        .chip-row { display: flex; overflow-x: auto; gap: 8px; padding-bottom: 5px; scrollbar-width: none; }
+        .chip-row::-webkit-scrollbar { display: none; }
+        .chip { padding: 8px 16px; border-radius: 20px; background: var(--accent); font-size: 14px; cursor: pointer; white-space: nowrap; border: 1px solid transparent; transition: all 0.2s; }
+        .chip.active { background: var(--primary); color: white; }
+        .slider-box { display: flex; flex-direction: column; gap: 5px; margin: 10px 0; }
+        .slider-label { display: flex; justify-content: space-between; font-size: 13px; color: var(--secondary); }
+        .slider-val { font-weight: bold; color: var(--primary); }
+        input[type="range"] { width: 100%; cursor: pointer; margin: 8px 0; }
+        .graph-box { height: 120px; background: #fff; border: 1px solid #eee; border-radius: 8px; overflow: hidden; }
+        .divider { height: 1px; background: #eee; margin: 15px 0; }
+        .recording-info { display: flex; justify-content: space-between; font-size: 12px; color: var(--secondary); margin-top: 5px; }
+        .preset-row { display: flex; gap: 10px; margin-bottom: 10px; }
+        .preset-btn { flex: 1; padding: 12px; border-radius: 8px; border: 1px solid #ddd; background: #f8f9fa; cursor: pointer; font-size: 12px; font-weight: bold; line-height: 1.2; }
+        .preset-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
+        
+        /* Стили настроек */
+        #settingsPanel { display: none; margin-top: 10px; border-top: 1px solid #eee; padding-top: 15px; }
+        .settings-group { margin-bottom: 20px; }
+        .settings-title { font-size: 14px; font-weight: bold; color: var(--primary); margin-bottom: 10px; border-bottom: 1px solid var(--accent); padding-bottom: 4px; }
+        
+        .indicator-row { display: flex; justify-content: space-around; margin-bottom: 15px; }
+        .ind-item { display: flex; flex-direction: column; align-items: center; gap: 5px; opacity: 0.3; transition: opacity 0.3s; }
+        .ind-item.active { opacity: 1; }
+        .ind-circle { width: 12px; height: 12px; border-radius: 50%; background: var(--primary); box-shadow: 0 0 8px var(--primary); }
+        .ind-label { font-size: 10px; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <!-- Подключение и Настройки -->
+    <div class="card">
+        <div class="header">
+            <h2 id="status" style="margin:0; font-size: 18px;">Bluetooth: Отключено</h2>
+            <div style="display: flex; gap: 5px;">
+                <button id="settingsToggle" class="btn-icon">⚙️</button>
+                <button id="connectBtn" class="btn" style="width: auto; padding: 8px 16px;">Connect</button>
+            </div>
+        </div>
+
+        <!-- Панель настроек -->
+        <div id="settingsPanel">
+            <div class="settings-group">
+                <div class="settings-title">Интенсивность (%)</div>
+                <div id="intensitySettings"></div>
+            </div>
+            <div class="settings-group">
+                <div class="settings-title">Step Mode (сек)</div>
+                <div id="stepSettings"></div>
+            </div>
+            <div class="settings-group">
+                <div class="settings-title">Pulse S / Pulse I (мс)</div>
+                <div id="pulseSettings"></div>
+            </div>
+            <button class="btn" style="background: #eee; color: #333; margin-top: 10px;" onclick="resetAllSettings()">Сбросить всё</button>
+        </div>
+    </div>
+
+    <!-- Давление и График -->
+    <div class="card">
+        <div style="display: flex; align-items: center; gap: 15px;">
+            <div style="flex: 1; text-align: center;">
+                <div style="font-size: 11px; color: var(--secondary); text-transform: uppercase;">Pressure</div>
+                <div class="pressure-val" id="pressureText">---</div>
+            </div>
+            <div class="graph-box" style="flex: 2.5;">
+                <canvas id="liveChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Режимы -->
+    <div class="card" style="padding: 15px 20px;">
+        <div class="chip-row" id="modeChips">
+            <div class="chip active" data-mode="CONSTANT">Manual</div>
+            <div class="chip" data-mode="CONST_PRESET">Const</div>
+            <div class="chip" data-mode="STEP">Step</div>
+            <div class="chip" data-mode="PULSE_SLOW">Pulse S</div>
+            <div class="chip" data-mode="PULSE_FAST">Pulse F</div>
+            <div class="chip" data-mode="PULSE_I">Pulse I</div>
+            <div class="chip" data-mode="SENSOR">Sensor</div>
+        </div>
+    </div>
+
+    <!-- Управление -->
+    <div class="card">
+        <h3 id="modeTitle" style="margin-top:0">Manual</h3>
+        
+        <!-- Индикаторы этапов (для Step и Pulse) -->
+        <div id="modeIndicators" class="indicator-row" style="display: none;"></div>
+
+        <div id="intensityControl">
+            <div class="slider-box">
+                <div class="slider-label"><span>Интенсивность</span><span class="slider-val" id="vibrationLabel">50%</span></div>
+                <input type="range" id="vibrationSlider" min="0" max="100" value="50">
+            </div>
+        </div>
+
+        <div id="constPresets" style="display: none;">
+            <div class="preset-row">
+                <button class="preset-btn" id="btnLow">LOW</button>
+                <button class="preset-btn" id="btnMed">MED</button>
+                <button class="preset-btn" id="btnHigh">HIGH</button>
+            </div>
+        </div>
+
+        <div id="pulseFPresets" style="display: none;">
+            <div class="preset-row">
+                <button class="preset-btn active" id="btnFSlow">SLOW</button>
+                <button class="preset-btn" id="btnFFast">FAST</button>
+            </div>
+        </div>
+
+        <button id="vibrationBtn" class="btn">Включить вибрацию</button>
+    </div>
+
+    <!-- Запись -->
+    <div class="card">
+        <button id="recordBtn" class="btn" style="background: #e9ecef; color: #333;">⏺ Начать запись</button>
+        <div class="recording-info">
+            <span id="pointsCount">Точек: 0</span>
+            <span id="recordTimer" style="font-family: monospace; font-weight: bold;">00:00.000</span>
+        </div>
+    </div>
+</div>
+
+<script>
+    // BLE UUIDs
+    const SERVICE_PRESSURE = "6f468792-f91f-11e3-a847-b2227cce2b54";
+    const CHAR_PRESSURE = "6f468bfc-f91f-11e3-a847-b2227cce2b54";
+    const SERVICE_VIBRATION = "78667579-7b48-43db-b8c5-7928a6b0a335";
+    const CHAR_VIBRATION = "78667579-a914-49a4-8333-aa3c0cd8fedc";
+
+    let device, charPressure, charVibration;
+    let isVibrating = false, isRecording = false;
+    let currentMode = "CONSTANT", vibrationLevel = 50;
+    let recordedData = [], recordStartTime = 0;
+    let pressureHistory = [];
+    let loopTimeout = null;
+    let currentStepIndex = -1;
+
+    // Default Settings
+    const defaultSettings = {
+        low: 30, med: 60, high: 90,
+        stepLow: 10, stepMed: 10, stepHigh: 10, stepPause: 10,
+        pulseSOn: 1000, pulseSOff: 1000,
+        pulseIOn: 1000, pulseIOff: 1000,
+        pulseFSOn: 500, pulseFSOff: 500,
+        pulseFFOn: 200, pulseFFOff: 200
+    };
+
+    let settings = JSON.parse(localStorage.getItem('mm_settings')) || {...defaultSettings};
+
+    // UI Elements
+    const connectBtn = document.getElementById('connectBtn');
+    const pressureText = document.getElementById('pressureText');
+    const vibrationBtn = document.getElementById('vibrationBtn');
+    const recordBtn = document.getElementById('recordBtn');
+    const vibrationSlider = document.getElementById('vibrationSlider');
+    const settingsPanel = document.getElementById('settingsPanel');
+    const indicatorsBox = document.getElementById('modeIndicators');
+
+    // Init Charts
+    const ctx = document.getElementById('liveChart').getContext('2d');
+    const liveChart = new Chart(ctx, {
+        type: 'line',
+        data: { labels: Array(50).fill(''), datasets: [{ data: [], borderColor: '#d93025', borderWidth: 2, pointRadius: 0, tension: 0.4, fill: false }] },
+        options: { 
+            responsive: true, maintainAspectRatio: false, animation: false,
+            scales: { x: { display: false }, y: { display: true, grid: { color: '#f0f0f0' } } },
+            plugins: { legend: { display: false } }
+        }
+    });
+
+    // --- Settings UI Generation ---
+    function renderSettings() {
+        const createSlider = (id, label, min, max, unit, val) => `
+            <div class="slider-box">
+                <div class="slider-label"><span>${label}</span><span class="slider-val">${val}${unit}</span></div>
+                <input type="range" min="${min}" max="${max}" value="${val}" oninput="updateSetting('${id}', this.value)">
+            </div>`;
+
+        document.getElementById('intensitySettings').innerHTML = 
+            createSlider('low', 'LOW', 0, 100, '%', settings.low) +
+            createSlider('med', 'MEDIUM', 0, 100, '%', settings.med) +
+            createSlider('high', 'HIGH', 0, 100, '%', settings.high);
+
+        document.getElementById('stepSettings').innerHTML = 
+            createSlider('stepLow', 'Время LOW', 1, 60, 'с', settings.stepLow) +
+            createSlider('stepMed', 'Время MED', 1, 60, 'с', settings.stepMed) +
+            createSlider('stepHigh', 'Время HIGH', 1, 60, 'с', settings.stepHigh) +
+            createSlider('stepPause', 'Время PAUSE', 1, 60, 'с', settings.stepPause);
+
+        document.getElementById('pulseSettings').innerHTML = 
+            createSlider('pulseSOn', 'Pulse S ON', 100, 5000, 'мс', settings.pulseSOn) +
+            createSlider('pulseSOff', 'Pulse S OFF', 100, 5000, 'мс', settings.pulseSOff) +
+            createSlider('pulseIOn', 'Pulse I ON', 100, 15000, 'мс', settings.pulseIOn) +
+            createSlider('pulseIOff', 'Pulse I OFF(Изм)', 100, 15000, 'мс', settings.pulseIOff);
+    }
+
+    window.updateSetting = (key, val) => {
+        settings[key] = parseInt(val);
+        localStorage.setItem('mm_settings', JSON.stringify(settings));
+        renderSettings();
+        updateVibrationLabels();
+    };
+
+    window.resetAllSettings = () => {
+        settings = {...defaultSettings};
+        localStorage.setItem('mm_settings', JSON.stringify(settings));
+        renderSettings();
+        updateVibrationLabels();
+    };
+
+    function updateVibrationLabels() {
+        document.getElementById('btnLow').innerText = `LOW (${settings.low}%)`;
+        document.getElementById('btnMed').innerText = `MED (${settings.med}%)`;
+        document.getElementById('btnHigh').innerText = `HIGH (${settings.high}%)`;
+    }
+
+    document.getElementById('settingsToggle').onclick = () => {
+        settingsPanel.style.display = settingsPanel.style.display === 'block' ? 'none' : 'block';
+    };
+
+    // --- BLE & Control ---
+    connectBtn.onclick = async () => {
+        try {
+            device = await navigator.bluetooth.requestDevice({
+                filters: [{ name: 'Flamingo Max' }],
+                optionalServices: [SERVICE_PRESSURE, SERVICE_VIBRATION]
+            });
+            const server = await device.gatt.connect();
+            const pService = await server.getPrimaryService(SERVICE_PRESSURE);
+            charPressure = await pService.getCharacteristic(CHAR_PRESSURE);
+            const vService = await server.getPrimaryService(SERVICE_VIBRATION);
+            charVibration = await vService.getCharacteristic(CHAR_VIBRATION);
+
+            await charPressure.startNotifications();
+            charPressure.addEventListener('characteristicvaluechanged', (e) => {
+                const val = e.target.value.getUint16(0, true);
+                pressureText.innerText = val;
+                pressureHistory.push(val);
+                if(pressureHistory.length > 50) pressureHistory.shift();
+                liveChart.data.datasets[0].data = pressureHistory;
+                const min = Math.min(...pressureHistory), max = Math.max(...pressureHistory);
+                liveChart.options.scales.y.min = min - 5; liveChart.options.scales.y.max = max + 5;
+                liveChart.update();
+                if(isRecording) recordPoint(val);
+            });
+
+            document.getElementById('status').innerText = "Статус: Подключено";
+            connectBtn.style.display = 'none';
+        } catch (e) { console.error(e); }
+    };
+
+    async function sendVibration(level) {
+        if(!charVibration) return;
+        const cmd = new Uint8Array([0x10, 0xff, 0x04, 0x0a, 0x32, 0x32, 0x00, 0x04, 0x08, level, 0x64, 0x00, 0x04, 0x08, 0x00, 0x64, 0x01]);
+        try { await charVibration.writeValue(cmd); } catch(e) {}
+    }
+
+    // --- Mode Logic Loops ---
+    async function runModeLoop() {
+        if(!isVibrating) return;
+
+        switch(currentMode) {
+            case "STEP":
+                const steps = [
+                    {l: settings.low, d: settings.stepLow * 1000},
+                    {l: settings.med, d: settings.stepMed * 1000},
+                    {l: settings.high, d: settings.stepHigh * 1000},
+                    {l: 0, d: settings.stepPause * 1000}
+                ];
+                currentStepIndex = (currentStepIndex + 1) % steps.length;
+                updateIndicators(currentStepIndex);
+                await sendVibration(steps[currentStepIndex].l);
+                loopTimeout = setTimeout(runModeLoop, steps[currentStepIndex].d);
+                break;
+
+            case "PULSE_SLOW":
+                currentStepIndex = (currentStepIndex + 1) % 2;
+                updateIndicators(currentStepIndex);
+                await sendVibration(currentStepIndex === 0 ? vibrationLevel : 0);
+                loopTimeout = setTimeout(runModeLoop, currentStepIndex === 0 ? settings.pulseSOn : settings.pulseSOff);
+                break;
+
+            case "PULSE_I":
+                currentStepIndex = (currentStepIndex + 1) % 2;
+                updateIndicators(currentStepIndex);
+                await sendVibration(currentStepIndex === 0 ? vibrationLevel : 0);
+                loopTimeout = setTimeout(runModeLoop, currentStepIndex === 0 ? settings.pulseIOn : settings.pulseIOff);
+                break;
+
+            case "PULSE_FAST":
+                currentStepIndex = (currentStepIndex + 1) % 2;
+                updateIndicators(currentStepIndex);
+                const isFast = document.getElementById('btnFFast').classList.contains('active');
+                await sendVibration(currentStepIndex === 0 ? vibrationLevel : 0);
+                loopTimeout = setTimeout(runModeLoop, isFast ? (currentStepIndex === 0 ? settings.pulseFFOn : settings.pulseFFOff) : (currentStepIndex === 0 ? settings.pulseFSOn : settings.pulseFSOff));
+                break;
+        }
+    }
+
+    function updateIndicators(idx) {
+        document.querySelectorAll('.ind-item').forEach((el, i) => {
+            el.classList.toggle('active', i === idx);
+        });
+    }
+
+    vibrationBtn.onclick = async () => {
+        isVibrating = !isVibrating;
+        clearTimeout(loopTimeout);
+        
+        if (isVibrating) {
+            vibrationBtn.innerText = "Выключить вибрацию";
+            vibrationBtn.classList.add('btn-stop');
+            currentStepIndex = -1;
+            if (["CONSTANT", "CONST_PRESET"].includes(currentMode)) {
+                await sendVibration(vibrationLevel);
+            } else if (currentMode !== "SENSOR") {
+                runModeLoop();
+            }
+        } else {
+            vibrationBtn.innerText = "Включить вибрацию";
+            vibrationBtn.classList.remove('btn-stop');
+            await sendVibration(0);
+            updateIndicators(-1);
+        }
+    };
+
+    // --- Mode Switching ---
+    document.getElementById('modeChips').onclick = (e) => {
+        const chip = e.target.closest('.chip');
+        if(!chip || isVibrating) return;
+        
+        document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+        chip.classList.add('active');
+        currentMode = chip.dataset.mode;
+        document.getElementById('modeTitle').innerText = chip.innerText;
+
+        // UI visibility
+        document.getElementById('intensityControl').style.display = ["STEP", "CONST_PRESET", "SENSOR"].includes(currentMode) ? 'none' : 'block';
+        document.getElementById('constPresets').style.display = (currentMode === "CONST_PRESET") ? 'block' : 'none';
+        document.getElementById('pulseFPresets').style.display = (currentMode === "PULSE_FAST") ? 'block' : 'none';
+        
+        setupIndicators();
+    };
+
+    function setupIndicators() {
+        indicatorsBox.style.display = 'none';
+        indicatorsBox.innerHTML = '';
+        let labels = [];
+        if (currentMode === "STEP") labels = ['LOW', 'MED', 'HIGH', 'PAUSE'];
+        else if (["PULSE_SLOW", "PULSE_FAST", "PULSE_I"].includes(currentMode)) labels = ['ON', 'OFF'];
+
+        if (labels.length) {
+            indicatorsBox.style.display = 'flex';
+            labels.forEach(l => {
+                indicatorsBox.innerHTML += `<div class="ind-item"><div class="ind-circle"></div><div class="ind-label">${l}</div></div>`;
+            });
+        }
+    }
+
+    // Presets Click
+    document.getElementById('btnLow').onclick = () => { vibrationLevel = settings.low; sendVibration(vibrationLevel); setActivePreset('constPresets', 'btnLow'); };
+    document.getElementById('btnMed').onclick = () => { vibrationLevel = settings.med; sendVibration(vibrationLevel); setActivePreset('constPresets', 'btnMed'); };
+    document.getElementById('btnHigh').onclick = () => { vibrationLevel = settings.high; sendVibration(vibrationLevel); setActivePreset('constPresets', 'btnHigh'); };
+    document.getElementById('btnFSlow').onclick = () => setActivePreset('pulseFPresets', 'btnFSlow');
+    document.getElementById('btnFFast').onclick = () => setActivePreset('pulseFPresets', 'btnFFast');
+
+    function setActivePreset(parent, id) {
+        document.querySelectorAll(`#${parent} .preset-btn`).forEach(b => b.classList.remove('active'));
+        document.getElementById(id).classList.add('active');
+    }
+
+    vibrationSlider.oninput = (e) => {
+        vibrationLevel = parseInt(e.target.value);
+        document.getElementById('vibrationLabel').innerText = vibrationLevel + "%";
+        if(isVibrating && currentMode === "CONSTANT") sendVibration(vibrationLevel);
+    };
+
+    // Recording
+    recordBtn.onclick = () => {
+        if(isRecording) {
+            isRecording = false;
+            recordBtn.innerText = "⏺ Начать запись";
+            recordBtn.style.background = "#e9ecef"; recordBtn.style.color = "#333";
+            const blob = new Blob([JSON.stringify({ mode: currentMode, date: new Date().toISOString(), data: recordedData }, null, 2)], { type: 'application/json' });
+            const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+            a.download = `MM_${currentMode}_${Date.now()}.json`; a.click();
+        } else {
+            isRecording = true; recordedData = []; recordStartTime = Date.now();
+            recordBtn.innerText = "⏹ Остановить запись";
+            recordBtn.style.background = "var(--error)"; recordBtn.style.color = "white";
+            updateTimer();
+        }
+    };
+
+    function recordPoint(p) {
+        recordedData.push({ timeMs: Date.now() - recordStartTime, pressure: p, vibration: isVibrating ? vibrationLevel : 0 });
+        document.getElementById('pointsCount').innerText = "Точек: " + recordedData.length;
+    }
+
+    function updateTimer() {
+        if(!isRecording) return;
+        const diff = Date.now() - recordStartTime;
+        const m = Math.floor(diff/60000), s = Math.floor((diff%60000)/1000), ms = diff%1000;
+        document.getElementById('recordTimer').innerText = `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}.${String(ms).padStart(3,'0')}`;
+        requestAnimationFrame(updateTimer);
+    }
+
+    // Init
+    renderSettings();
+    updateVibrationLabels();
+</script>
+
+</body>
+</html>
